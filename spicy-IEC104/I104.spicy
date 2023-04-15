@@ -1,0 +1,275 @@
+module I104;
+# Need this module so the parser has little-endian byte order support
+# since the default for Spicy is big-endian
+import spicy;
+const ioa_length = 3;
+
+public type Info_obj_code= enum {
+    M_SP_NA_1 = 1,
+    M_SP_TA_1 = 2,
+    M_DP_NA_1 = 3,
+    M_SP_TB_1 = 30,
+    M_DP_TB_1 = 31,
+    C_SC_NA_1 = 45,
+    C_DC_NA_1 = 46,
+    M_EI_NA_1 = 70,
+    C_IC_NA_1 = 100
+};
+
+public type Apcis = unit {
+    apcis :  Apci()[];
+    on %init{
+        #  "init APCIs", self;
+    }
+    on %done{
+        # print "done, APCIS:", self;
+    }
+
+};
+
+type Apci = unit {
+    # Setting the byte order to little-endian.
+    # This will work for the unit context
+    #%byte-order=spicy::ByteOrder::Little;
+    #TCP: bytes &until=b"\x68";
+    # Start byte for APCI aka start of APDU aka start of IEC104 packet
+    start:  b"\x68" &convert=$$.to_uint(spicy::ByteOrder::Little);
+
+    # Length of APDU (application protocol data unit aka packet)
+    # 8-bit integer
+    apdu_len : uint8 &byte-order=spicy::ByteOrder::Little;
+
+    # Will only look at the I frame for now. S & U frames consist ONLY of APCI "header"
+    # I frames also have an ASDU (Application Service Data Units) which can carry up
+    # to 127 information objects referring to 127 different addresses on the RTUs
+    # that they control
+    ctrl : bitfield(32){
+    not_i_mode : 0; # bit 0
+    mode : 0..1; # bit 0-1
+    i_send_seq : 1..15; #Only used by the I frame, bits 2-16
+    u_start_data_transfer : 4..5; #bits 17-18
+    u_stop_data_test_frame : 2..3; #bits 19-20
+    u_test_fr : 6..7; #bits 21-28
+    recv_seq : 17..31; #bits 29-
+    };
+    # I frame only happens if the first bit is 0
+    # Otherwise it is either a S or a U frame
+
+    asdu : Asdu if (self.ctrl.not_i_mode == 0 && self.apdu_len > 4);
+    on %init {
+     # "INIT APCI";
+    }
+
+    on ctrl {
+    #  "after ctrl APCI", self.apdu_len;
+    }
+
+    on %done {
+        #  "APDU len", self.apdu_len;
+        #  "ALL", self;
+        #  "DONE APCI";
+    }
+};
+
+type Asdu = unit {
+    %byte-order=spicy::ByteOrder::Little;
+    info_obj_type : uint8 &convert=Info_obj_code($$);
+    data_unit_identifier : bitfield (8) {
+        seq : 7;
+        num_ix : 0..6;
+    };
+    cause_of_transmission : bitfield (8) {
+        cot : 0..5;
+        negative : 6;
+        test : 7;
+    };
+    originator_address : uint8;
+    common_address : uint16;
+    info_obj_addr: bytes &size=ioa_length &convert=$$.to_uint(spicy::ByteOrder::Little) if (self.data_unit_identifier.seq == 1);
+    switch (self.info_obj_type){
+        # Need to pass the SEQ bool because only when it IS FALSE aka SEQ == 0,
+        # then each ASDU will have its unique IOA
+        # when SEQ == 1 aka true there will be one IOA for all ASDUs that follow
+        #1
+        Info_obj_code::M_SP_NA_1 -> m_sp_na_1 : Single_Point_Information(self.data_unit_identifier.seq == 0)[self.data_unit_identifier.num_ix];
+        #2
+        Info_obj_code::M_SP_TA_1 -> m_sp_ta_1 : Single_Point_Information_With_TT(self.data_unit_identifier.seq == 0)[self.data_unit_identifier.num_ix];
+        #3
+        Info_obj_code::M_DP_NA_1 -> m_dp_na_1 : Double_Point_Information(self.data_unit_identifier.seq == 0)[self.data_unit_identifier.num_ix];
+        #45
+        Info_obj_code::C_SC_NA_1 -> c_sc_na_1 : Single_Command(self.data_unit_identifier.seq == 0)[self.data_unit_identifier.num_ix];
+        #46
+        Info_obj_code::C_DC_NA_1 -> c_dc_na_1 : Double_Command(self.data_unit_identifier.seq == 0)[self.data_unit_identifier.num_ix];
+        #30
+        Info_obj_code::M_SP_TB_1 -> m_sp_tb_1 : Single_Point_Information_With_TTCP56(self.data_unit_identifier.seq == 0)[self.data_unit_identifier.num_ix];
+        #31
+        Info_obj_code::M_DP_TB_1 -> m_dp_tb_1 : Double_Point_Information_With_TTCP56(self.data_unit_identifier.seq == 0)[self.data_unit_identifier.num_ix];
+        #70
+        Info_obj_code::M_EI_NA_1 -> m_ei_na_1 : End_Of_Initialization(self.data_unit_identifier.seq == 0)[self.data_unit_identifier.num_ix];
+        #100
+        Info_obj_code::C_IC_NA_1 -> c_ic_na_1 : Interrogation_Command(self.data_unit_identifier.seq == 0)[self.data_unit_identifier.num_ix];
+    };
+    on %init {
+        #  "INIT ASDU";
+    }
+    on %done {
+         # print "DONE ASDU", self;
+    }
+};
+
+#1
+type Single_Point_Information = unit(seq : bool){
+    info_obj_addr: bytes &size=ioa_length &convert=$$.to_uint(spicy::ByteOrder::Little) if (seq);
+    single_point_information_with_quality_descriptor : bitfield (8){
+        st : 0; #status
+        bl : 4; #blocked
+        sb : 5; #substituted
+        nt : 6; #not topical
+        iv : 7; #invalid
+    };
+    on %init {
+        #  "INIT 1";
+    }
+};
+#2
+type Single_Point_Information_With_TT = unit(seq : bool) {
+    info_obj_addr: bytes &size=ioa_length &convert=$$.to_uint(spicy::ByteOrder::Little) if (seq);
+    single_point_information_with_quality_descriptor : bitfield (8){
+        st : 0; #status
+        bl : 4; #blocked
+        sb : 5; #substituted
+        nt : 6; #not topical
+        iv : 7; #invalid
+    };
+    cp24time2a : CP24TIME2A;
+    on %init {
+        #  "INIT 2";
+    }
+};
+
+#3
+type Double_Point_Information = unit (seq : bool){ #3
+    info_obj_addr: bytes &size=ioa_length &convert=$$.to_uint(spicy::ByteOrder::Little) if (seq); #not 100% sure that the length is always correct
+    double_point_information_with_quality_descriptor : bitfield(8) {
+    st : 0..1;#status
+    bl : 4; #blocked
+    sb : 5; #substituted
+    nt : 6; #not topical
+    iv : 7; #invalid
+    };
+    on %init {
+    # "INIT 3";
+    }
+};
+#45
+type Single_Command = unit (seq : bool){ #45 only SEQ=0 allowed
+    info_obj_addr: bytes &size=ioa_length &convert=$$.to_uint(spicy::ByteOrder::Little) if (seq);
+    single_command : bitfield (8){
+        scs : 0;
+        qu : 2..6; #not topical
+        se : 7; #invalid
+    };
+    on %done {
+       print "done 45", self;
+       # print(zeek_c_sc_na_1(self));
+    }
+};
+#46
+type Double_Command = unit (seq : bool){ #46 only SEQ=0 allowed
+    info_obj_addr: bytes &size=ioa_length &convert=$$.to_uint(spicy::ByteOrder::Little) if (seq); #not 100% sure that the length is always correct
+    double_command : bitfield(8) {
+    dcs : 0..1;
+    qu : 2..6; #no pulse defined / not topical
+    se : 7; #invalid
+};
+    on %done {
+      print "done 46", self;
+    }
+};
+#30
+type Single_Point_Information_With_TTCP56 = unit (seq:bool){
+    info_obj_addr: bytes &size=ioa_length &convert=$$.to_uint(spicy::ByteOrder::Little) if (seq); #not 100% sure that the length is always correct
+    single_point_information_with_quality_descriptor : bitfield (8){
+        st : 0; #status
+        bl : 4; #blocked
+        sb : 5; #substituted
+        nt : 6; #not topical
+        iv : 7; #invalid
+    };
+    cp56time2a : CP56TIME2A;
+    on %init {
+    #  "INIT 30";
+    }
+};
+#31
+type Double_Point_Information_With_TTCP56 = unit (seq : bool){
+    info_obj_addr: bytes &size=ioa_length &convert=$$.to_uint(spicy::ByteOrder::Little) if (seq);
+    double_point_information_with_quality_descriptor :  bitfield(8) {
+    st : 0..1;#status
+    bl : 4; #blocked
+    sb : 5; #substituted
+    nt : 6; #not topical
+    iv : 7; #invalid
+    };
+    cp56time2a : CP56TIME2A;#bytes &length=7;
+    on %init {
+    # "INIT 31";
+    }
+};
+#70
+type End_Of_Initialization = unit (seq : bool){ #70 only SEQ=0 allowed
+    info_obj_addr: bytes &size=ioa_length &convert=$$.to_uint(spicy::ByteOrder::Little) if (seq);
+    cause_of_initialization : bitfield(8) {
+    r : 0..6; # local power switch on
+    i : 7; # initialization
+    };
+
+};
+#100
+type Interrogation_Command = unit (seq : bool){
+    info_obj_addr: bytes &size=ioa_length &convert=$$.to_uint(spicy::ByteOrder::Little) if (seq);
+    qualifier_of_interrogation: uint8;
+    on %init {
+    #  "INIT 100";
+    }
+   };
+
+ type CP56TIME2A = unit {
+    milli : uint16 &byte-order=spicy::ByteOrder::Little;
+    minute : uint8;
+    hour : uint8;
+    day : uint8;
+    mon : uint8;
+    year : uint8;
+
+    on %done {
+    #remove unwanted bits
+     self.minute = self.minute & 63;
+     self.hour   = self.hour & 31;
+     self.day    = self.day & 31;
+     self.mon    = self.mon & 15;
+     self.year   = self.year & 127;
+    }
+};
+
+type CP24TIME2A = unit {
+    milli : uint16 &byte-order = spicy::ByteOrder::Little;
+    minute : uint8;
+
+    on %done {
+    #remove unwanted bits
+     self.minute = self.minute & 63;
+     }
+};
+
+#45
+public function zeek_c_sc_na_1(asdu:Single_Command) :uint64 {
+    return (asdu.info_obj_addr);
+}
+
+
+
+
+
+
+##

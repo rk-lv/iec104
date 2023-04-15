@@ -1,0 +1,29 @@
+import I104;
+protocol analyzer spicy::I104 over TCP:
+    parse with I104::Apcis,
+    port 2404/tcp;
+
+on I104::Apci -> event I104::apci(
+  $conn,
+   self.apdu_len,
+   self.ctrl.mode,
+   self.ctrl.i_send_seq,
+   self.ctrl.u_start_data_transfer,
+   self.ctrl.u_stop_data_test_frame,
+   self.ctrl.u_test_fr,
+   self.ctrl.recv_seq
+   );
+
+on I104::Asdu -> event I104::asdu($conn,
+    self.originator_address,
+    self.common_address
+    );
+
+# on I104::Single_Command -> event I104::single_command($conn);
+on I104::Single_Command -> event I104::single_command($conn, self.info_obj_addr, self.single_command.scs);
+on I104::Double_Command -> event I104::double_command($conn, self.info_obj_addr, self.double_command.dcs);
+on I104::Single_Point_Information -> event I104::Single_Point_Information($conn);
+on I104::Single_Point_Information_With_TT -> event I104::Single_Point_Information_With_TT($conn);
+on I104::Double_Point_Information -> event I104::Double_Point_Information($conn);
+on I104::End_Of_Initialization -> event I104::End_Of_Initialization($conn);
+on I104::Interrogation_Command -> event I104::Interrogation_Command($conn);
