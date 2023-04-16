@@ -8,9 +8,8 @@ export {
 	## Record type containing the column fields of the I104 log.
 	type Info: record {
 		ts: time &log;
-		#uid: string &optional &log;
 		id: conn_id &log;
-		## ASDU
+		## ASDU single and double command logging
 		command_single: string &optional &log;
 		command_double: string &optional &log;
 	};
@@ -24,11 +23,11 @@ redef record connection += {
 
 event zeek_init() &priority=5
     {
-    # Create the stream. This adds a default filter automatically.
+    # Create the stream
     Log::create_stream(I104::LOG, [$columns=Info, $path="I104"]);
     }
 
-
+# Single command
 event I104::single_command(c: connection, info_obj_addr: int, scs: int)
 {
 	local command: string = "";
@@ -44,10 +43,9 @@ event I104::single_command(c: connection, info_obj_addr: int, scs: int)
 		{
 			command = "ON/OFF";
 		}
+	# Create Info object defined in lines 9-14
 	local rec: I104::Info = [$ts=network_time(), $id=c$id, $command_single=command];
-    # hook set_session(c, originator_address);
-    # local info = c$I104;
-	# Write the log entry.
+	# Log the rec object
 	c$I104 = rec;
 	Log::write(I104::LOG, rec);
 }
@@ -69,8 +67,6 @@ event I104::double_command(c: connection, info_obj_addr: int, dcs: int)
 		}
 
 	local rec: I104::Info = [$ts=network_time(), $id=c$id, $command_double=command];
-    # hook set_session(c, originator_address);
-    # local info = c$I104;
 	# Write the log entry.
 	c$I104 = rec;
 	Log::write(I104::LOG, rec);
