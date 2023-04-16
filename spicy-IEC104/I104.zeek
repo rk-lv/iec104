@@ -49,7 +49,7 @@ event I104::single_command(c: connection, info_obj_addr: int, scs: int)
 	c$I104 = rec;
 	Log::write(I104::LOG, rec);
 }
-
+# Double command
 event I104::double_command(c: connection, info_obj_addr: int, dcs: int)
 {
 	local command: string = "";
