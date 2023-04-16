@@ -66,8 +66,8 @@ type Apci = unit {
 
     on %done {
         #  "APDU len", self.apdu_len;
-        #  "ALL", self;
-        #  "DONE APCI";
+        print  "ALL", self;
+        print  "DONE APCI";
     }
 };
 
